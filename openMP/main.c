@@ -17,8 +17,7 @@ int main(int argc, char *argv[])
 
     for (thread = 0; thread < thread_count; thread++)
     {
-        int *pipi = 22;
-        pthread_create(&thread_handles[thread], NULL, Hello, pipi);
+        pthread_create(&thread_handles[thread], NULL, Hello, (void *)thread);
     }
 
     printf("Hello World from the main thread\n");
