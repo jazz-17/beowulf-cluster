@@ -2,12 +2,11 @@
 
 # --- Configuration ---
 # Directory containing the source code (.c file), relative to this script's location
-SOURCE_SUBDIR="MPI"
+SOURCE_SUBDIR="src/mpi"
 # Base output directory for the compiled executable, relative to this script's location
 # We'll put the executable alongside the source code.
-OUTPUT_SUBDIR="MPI"
+OUTPUT_SUBDIR="build"
 
-COMPILER="mpicc"                        # MPI Compiler
 FLAGS="-Wall"                           # Compiler flags (e.g., -Wall, -O2)
 NODES=("node2" "node3")                 # List of worker nodes to copy the executable to (node1 is local)
 HOSTFILE_PATH="~/hostfile"              # Path to the MPI hostfile
@@ -16,8 +15,8 @@ HOSTFILE_PATH="~/hostfile"              # Path to the MPI hostfile
 if [ "$#" -ne 2 ]; then
   echo "Usage: $0 <source_filename_no_extension> <num_processes>"
   echo "  Example: $0 mpi_hello 3"
-  echo "  Assumes source file is located at: ./${SOURCE_SUBDIR}/<source_filename_no_extension>.c"
-  echo "  Compiled executable will be placed at: ./${OUTPUT_SUBDIR}/<source_filename_no_extension>"
+  echo "  Assumes source file is located at: ./${SOURCE_SUBDIR}/<source_filename>.c"
+  echo "  Compiled executable will be placed at: ./${OUTPUT_SUBDIR}/<source_filename>"
   echo "  Requires hostfile at: ${HOSTFILE_PATH}"
   exit 1
 fi
@@ -70,7 +69,7 @@ fi
 
 # --- Compilation ---
 echo "Compiling ${SOURCE_FILE} -> ${OUTPUT_EXECUTABLE}"
-if ! "${COMPILER}" "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE}" ${FLAGS}; then
+if ! mpicc "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE}" ${FLAGS}; then
   echo "Compilation failed!"
   exit 1
 fi
