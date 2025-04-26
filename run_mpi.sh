@@ -7,14 +7,15 @@ SOURCE_SUBDIR="src/mpi"
 # We'll put the executable alongside the source code.
 OUTPUT_SUBDIR="build"
 
-FLAGS="-Wall"                           # Compiler flags (e.g., -Wall, -O2)
-NODES=("node2" "node3")                 # List of worker nodes to copy the executable to (node1 is local)
-HOSTFILE_PATH="~/hostfile"              # Path to the MPI hostfile
+FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g for debugging)
+NODES=("node2" "node3")                  # List of worker nodes to copy the executable to (assumes node1 is local)
+HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
 
 # --- Argument Handling ---
-if [ "$#" -ne 2 ]; then
-  echo "Usage: $0 <source_filename_no_extension> <num_processes>"
-  echo "  Example: $0 mpi_hello 3"
+if [ "$#" -lt 2 ]; then
+  echo "Usage: $0 <source_filename_no_extension> <num_processes> [args_for_mpi_program...]"
+  echo "  Example 1 (no args for program): $0 mpi_hello 4"
+  echo "  Example 2 (with args for program): $0 mpi_trapezoid 4 0.0 1.0 10000"
   echo "  Assumes source file is located at: ./${SOURCE_SUBDIR}/<source_filename>.c"
   echo "  Compiled executable will be placed at: ./${OUTPUT_SUBDIR}/<source_filename>"
   echo "  Requires hostfile at: ${HOSTFILE_PATH}"
@@ -26,93 +27,115 @@ NUM_OF_PROCESSES="$2"
 
 # Basic check for positive integer for number of processes
 if ! [[ "$NUM_OF_PROCESSES" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: Number of processes must be a positive integer."
+    echo "Error: Number of processes must be a positive integer, got '${NUM_OF_PROCESSES}'."
     exit 1
 fi
 
+# Remove the first two arguments (script name handled implicitly, filename, num_processes)
+# so that $@ contains only the arguments intended for the MPI program.
+shift 2
+MPI_PROGRAM_ARGS=("$@") # Store remaining arguments in an array for clarity/safety
 
+# --- Path Management ---
 # Get the directory where the script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
 # Construct full paths relative to the script's location
 SOURCE_FILE="${SCRIPT_DIR}/${SOURCE_SUBDIR}/${FILENAME_NO_EXT}.c"
-OUTPUT_EXECUTABLE="${SCRIPT_DIR}/${OUTPUT_SUBDIR}/${FILENAME_NO_EXT}"
-# Path relative to home dir, needed for remote execution and hostfile resolution
-OUTPUT_EXECUTABLE_REL_HOME="./${OUTPUT_SUBDIR}/${FILENAME_NO_EXT}" # Assumes script is run from ~ or similar relative structure exists
-HOSTFILE_PATH_RESOLVED=$(eval echo ${HOSTFILE_PATH}) # Resolve ~ in hostfile path for checks
-
+OUTPUT_EXECUTABLE_ABS="${SCRIPT_DIR}/${OUTPUT_SUBDIR}/${FILENAME_NO_EXT}"
+# Path relative to home dir. This relies on mpirun starting processes in the user's home directory on remote nodes (default OpenMPI+SSH behavior).
+OUTPUT_EXECUTABLE_REL_HOME="./${OUTPUT_SUBDIR}/${FILENAME_NO_EXT}"
+HOSTFILE_PATH_RESOLVED=$(eval echo "${HOSTFILE_PATH}") # Resolve ~ in hostfile path
 
 # --- Pre-checks ---
+echo "--- Pre-checks ---"
 if [ ! -f "${SOURCE_FILE}" ]; then
   echo "Error: Source file not found at ${SOURCE_FILE}"
   exit 1
 fi
+echo "Source file found: ${SOURCE_FILE}"
 
 if [ ! -f "${HOSTFILE_PATH_RESOLVED}" ]; then
   echo "Error: Hostfile not found at ${HOSTFILE_PATH_RESOLVED}"
   echo "Please create it with your nodes (e.g., node1 slots=1, node2 slots=1, etc.)"
   exit 1
 fi
+echo "Hostfile found: ${HOSTFILE_PATH_RESOLVED}"
+echo "--------------------"
 
 
 # --- Ensure output directory exists (locally) ---
-# Get the directory part of the output executable path
-OUTPUT_DIR_ABS=$(dirname "${OUTPUT_EXECUTABLE}")
+OUTPUT_DIR_ABS=$(dirname "${OUTPUT_EXECUTABLE_ABS}")
 if [ ! -d "${OUTPUT_DIR_ABS}" ]; then
-  echo "Creating output directory: ${OUTPUT_DIR_ABS}"
+  echo "Creating local output directory: ${OUTPUT_DIR_ABS}"
   mkdir -p "${OUTPUT_DIR_ABS}"
   if [ $? -ne 0 ]; then
-    echo "Failed to create output directory: ${OUTPUT_DIR_ABS}"
+    echo "Error: Failed to create local output directory: ${OUTPUT_DIR_ABS}"
     exit 1
   fi
 fi
 
 # --- Compilation ---
-echo "Compiling ${SOURCE_FILE} -> ${OUTPUT_EXECUTABLE}"
-if ! mpicc "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE}" ${FLAGS}; then
-  echo "Compilation failed!"
+echo "--- Compilation ---"
+echo "Compiling ${SOURCE_FILE} -> ${OUTPUT_EXECUTABLE_ABS}"
+if ! mpicc "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE_ABS}" ${FLAGS}; then
+  echo "Error: Compilation failed!"
   exit 1
 fi
 echo "Compilation successful."
+echo "--------------------"
 
 # --- Distribution (Copy to other nodes) ---
-echo "Distributing executable to worker nodes..."
+echo "--- Distribution ---"
+echo "Distributing executable to worker nodes: ${NODES[*]}"
 COPY_FAILED=0
+REMOTE_OUTPUT_DIR_REL_HOME="./${OUTPUT_SUBDIR}" # Needs to match OUTPUT_EXECUTABLE_REL_HOME structure
+
 for NODE in "${NODES[@]}"; do
   # Ensure remote directory exists first (robustness)
-  echo "  Ensuring directory exists on ${NODE}..."
-  ssh "${NODE}" "mkdir -p ~/${OUTPUT_SUBDIR}"
+  echo "  Ensuring directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE}..."
+  # Use double quotes around the command for ssh
+  ssh "${NODE}" "mkdir -p ${REMOTE_OUTPUT_DIR_REL_HOME}"
   if [ $? -ne 0 ]; then
-      echo "  Warning: Failed to ensure directory exists on ${NODE}. Copy might fail."
-      # Decide if this should be a fatal error or just a warning
+      echo "  Error: Failed to ensure directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE} via ssh."
+      COPY_FAILED=1
+      # Continue to check other nodes, but flag failure
+      continue # Skip scp for this node if mkdir failed
   fi
 
-  echo "  Copying ${OUTPUT_EXECUTABLE} to ${NODE}:~/${OUTPUT_SUBDIR}/"
-  scp "${OUTPUT_EXECUTABLE}" "${NODE}:~/${OUTPUT_SUBDIR}/"
+  echo "  Copying ${OUTPUT_EXECUTABLE_ABS} to ${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
+  # Use the absolute path for the source, relative path (from home) for destination
+  scp "${OUTPUT_EXECUTABLE_ABS}" "${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
   if [ $? -ne 0 ]; then
-    echo "  ERROR: Failed to copy executable to ${NODE}!"
+    echo "  Error: Failed to copy executable to ${NODE}!"
     COPY_FAILED=1
   fi
 done
 
 if [ ${COPY_FAILED} -eq 1 ]; then
-    echo "Distribution failed. Aborting execution."
+    echo "Error: Distribution failed on one or more nodes. Aborting execution."
     exit 1
 fi
 echo "Distribution successful."
+echo "--------------------"
 
 # --- Execution ---
+echo "--- Execution ---"
 echo "Executing ${OUTPUT_EXECUTABLE_REL_HOME} with ${NUM_OF_PROCESSES} processes..."
-# Execute the mpi program using the path relative to the home directory,
-# as mpirun will start processes in the user's home directory on remote nodes.
-# Use the resolved hostfile path.
-mpirun -np "${NUM_OF_PROCESSES}" --hostfile "${HOSTFILE_PATH_RESOLVED}" "${OUTPUT_EXECUTABLE_REL_HOME}"
+echo "MPI Program Arguments: ${MPI_PROGRAM_ARGS[*]}" # Show arguments being passed
+
+# Execute the mpi program using the path relative to the home directory.
+# Pass any additional arguments captured earlier using "${MPI_PROGRAM_ARGS[@]}"
+# The quotes around "${MPI_PROGRAM_ARGS[@]}" are important to handle arguments with spaces correctly.
+mpirun -np "${NUM_OF_PROCESSES}" --hostfile "${HOSTFILE_PATH_RESOLVED}" "${OUTPUT_EXECUTABLE_REL_HOME}" "${MPI_PROGRAM_ARGS[@]}"
 EXECUTION_STATUS=$? # Capture the exit status of mpirun
 
 if [ ${EXECUTION_STATUS} -ne 0 ]; then
-  echo "Execution failed with status: ${EXECUTION_STATUS}"
+  echo "Error: Execution failed with status: ${EXECUTION_STATUS}"
+  echo "--------------------"
   exit ${EXECUTION_STATUS} # Exit with the same status as the failed command
 fi
 
 echo "Execution finished successfully."
+echo "--------------------"
 exit 0
