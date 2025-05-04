@@ -9,6 +9,7 @@ OUTPUT_SUBDIR="build"
 
 FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g for debugging)
 HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
+export PMIX_MCA_pcompress_base_silence_warning=1
 
 # --- Argument Handling ---
 if [ "$#" -lt 2 ]; then
@@ -104,3 +105,4 @@ fi
 echo "Execution finished successfully."
 echo "--------------------"
 exit 0
+
