@@ -8,7 +8,6 @@ SOURCE_SUBDIR="src/mpi"
 OUTPUT_SUBDIR="build"
 
 FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g for debugging)
-NODES=("node2" "node3")                  # List of worker nodes to copy the executable to (assumes node1 is local)
 HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
 
 # --- Argument Handling ---
@@ -83,40 +82,6 @@ if ! mpicc "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE_ABS}" ${FLAGS}; then
   exit 1
 fi
 echo "Compilation successful."
-echo "--------------------"
-
-# --- Distribution (Copy to other nodes) ---
-echo "--- Distribution ---"
-echo "Distributing executable to worker nodes: ${NODES[*]}"
-COPY_FAILED=0
-REMOTE_OUTPUT_DIR_REL_HOME="./${OUTPUT_SUBDIR}" # Needs to match OUTPUT_EXECUTABLE_REL_HOME structure
-
-for NODE in "${NODES[@]}"; do
-  # Ensure remote directory exists first (robustness)
-  echo "  Ensuring directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE}..."
-  # Use double quotes around the command for ssh
-  ssh "${NODE}" "mkdir -p ${REMOTE_OUTPUT_DIR_REL_HOME}"
-  if [ $? -ne 0 ]; then
-      echo "  Error: Failed to ensure directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE} via ssh."
-      COPY_FAILED=1
-      # Continue to check other nodes, but flag failure
-      continue # Skip scp for this node if mkdir failed
-  fi
-
-  echo "  Copying ${OUTPUT_EXECUTABLE_ABS} to ${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
-  # Use the absolute path for the source, relative path (from home) for destination
-  scp "${OUTPUT_EXECUTABLE_ABS}" "${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
-  if [ $? -ne 0 ]; then
-    echo "  Error: Failed to copy executable to ${NODE}!"
-    COPY_FAILED=1
-  fi
-done
-
-if [ ${COPY_FAILED} -eq 1 ]; then
-    echo "Error: Distribution failed on one or more nodes. Aborting execution."
-    exit 1
-fi
-echo "Distribution successful."
 echo "--------------------"
 
 # --- Execution ---
