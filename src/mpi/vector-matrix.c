@@ -63,10 +63,10 @@ int main(int argc, char *argv[])
         if (my_rank == 0)
         {
             fprintf(stderr, "Usage: %s <rows_m> <cols_n>\n", argv[0]);
-            fprintf(stderr, "Using default values: m=8, n=4\n");
+            fprintf(stderr, "Using default values: m=9, n=6\n");
         }
-        m = 8;
-        n = 4;
+        m = 9;
+        n = 6;
     }
     else
     {
