@@ -10,7 +10,7 @@ int main(int argc, char *argv[])
 
     // --- Hardcoded Dimensions (ensure divisible by comm_sz) ---
     // Using the defaults you mentioned m=9, n=6 which works for comm_sz=3
-    const int m = 9;
+    const int m = 8;
     const int n = 6;
 
     int local_m;            // Number of rows per process
