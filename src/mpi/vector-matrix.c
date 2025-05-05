@@ -76,13 +76,11 @@ int main(int argc, char *argv[])
     // ... before Allgather ...
     printf("Rank %d: Reached MPI_Allgather.\n", my_rank);
     fflush(stdout);
-    MPI_Barrier(MPI_COMM_WORLD); // Optional: Sync before collective
 
     MPI_Allgather(local_x, local_n, MPI_DOUBLE,
                   full_x, local_n, MPI_DOUBLE,
                   MPI_COMM_WORLD);
 
-    MPI_Barrier(MPI_COMM_WORLD); // Optional: Sync after collective
     printf("Rank %d: Finished MPI_Allgather.\n", my_rank);
     fflush(stdout);
     // ... rest of the
