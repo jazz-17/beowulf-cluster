@@ -19,28 +19,39 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
 
     // Get the hostname of the node where this process is running
-    char hostname[256];
-    gethostname(hostname, sizeof(hostname));
+    // char hostname[256]; // Hostname isn't used in the final print, can be removed if not needed
+    // gethostname(hostname, sizeof(hostname));
 
     char greeting[MAX_MESSAGE_SIZE];
+    MPI_Status status; // Status object is useful, especially with MPI_ANY_SOURCE
 
     if (my_rank != 0)
     {
-        sprintf(greeting, "Greetings from process %d of %d !", my_rank, world_size);
+        // Non-zero ranks send their greeting to rank 0
+        sprintf(greeting, "Greetings from process %d of %d!", my_rank, world_size);
         MPI_Send(greeting, strlen(greeting) + 1, MPI_CHAR, 0, 0, MPI_COMM_WORLD);
     }
-    else
+    else // Rank 0's logic
     {
-        printf("Greetings from process %d of %d !", my_rank, world_size);
-        for (int i = 1; i < world_size; i++)
+        // Print rank 0's own greeting directly
+        printf("Process 0 (myself) says: Greetings from process %d of %d!\n", my_rank, world_size);
+
+        // Receive greetings from all *other* processes (ranks 1 to world_size - 1)
+        // We expect world_size - 1 messages in total.
+        printf("Receiving greetings from other processes:\n");
+        for (int i = 1; i < world_size; i++) // Loop from 1 to world_size-1
         {
-            MPI_Recv(greeting, MAX_MESSAGE_SIZE, MPI_CHAR, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            printf("%s\n", greeting);
+            // Option 1: Receive from specific ranks (if order matters or is known)
+            // MPI_Recv(greeting, MAX_MESSAGE_SIZE, MPI_CHAR, i, 0, MPI_COMM_WORLD, &status);
+
+            // Option 2: Receive from any source (more flexible, generally preferred)
+            MPI_Recv(greeting, MAX_MESSAGE_SIZE, MPI_CHAR, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
+
+            // You can get the actual sender's rank from the status object if needed:
+            // printf("Received from rank %d: %s\n", status.MPI_SOURCE, greeting);
+            printf("Received: %s\n", greeting); // Print the received message
         }
     }
-    // // Print a message including hostname, rank, and total size
-    // printf("Hello from node %s, rank %d out of %d processors\n",
-    //        hostname, my_rank, world_size);
 
     // Finalize the MPI environment. No MPI calls should be made after this.
     MPI_Finalize();
