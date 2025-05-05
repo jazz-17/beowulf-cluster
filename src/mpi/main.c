@@ -32,7 +32,7 @@ int main(int argc, char **argv)
     else
     {
         printf("Greetings from process %d of %d !", my_rank, world_size);
-        for (int i = 0; i < world_size; i++)
+        for (int i = 1; i < world_size; i++)
         {
             MPI_Recv(greeting, MAX_MESSAGE_SIZE, MPI_CHAR, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             printf("%s\n", greeting);

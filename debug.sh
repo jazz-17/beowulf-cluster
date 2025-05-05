@@ -8,8 +8,8 @@ SOURCE_SUBDIR="src/mpi"
 OUTPUT_SUBDIR="build"
 
 FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g for debugging)
-NODES=("node2" "node3")                  # List of worker nodes to copy the executable to (assumes node1 is local)
 HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
+export PMIX_MCA_pcompress_base_silence_warning=1
 
 # --- Argument Handling ---
 if [ "$#" -lt 2 ]; then
@@ -55,12 +55,6 @@ if [ ! -f "${SOURCE_FILE}" ]; then
 fi
 echo "Source file found: ${SOURCE_FILE}"
 
-if [ ! -f "${HOSTFILE_PATH_RESOLVED}" ]; then
-  echo "Error: Hostfile not found at ${HOSTFILE_PATH_RESOLVED}"
-  echo "Please create it with your nodes (e.g., node1 slots=1, node2 slots=1, etc.)"
-  exit 1
-fi
-echo "Hostfile found: ${HOSTFILE_PATH_RESOLVED}"
 echo "--------------------"
 
 
@@ -85,40 +79,6 @@ fi
 echo "Compilation successful."
 echo "--------------------"
 
-# --- Distribution (Copy to other nodes) ---
-echo "--- Distribution ---"
-echo "Distributing executable to worker nodes: ${NODES[*]}"
-COPY_FAILED=0
-REMOTE_OUTPUT_DIR_REL_HOME="./${OUTPUT_SUBDIR}" # Needs to match OUTPUT_EXECUTABLE_REL_HOME structure
-
-for NODE in "${NODES[@]}"; do
-  # Ensure remote directory exists first (robustness)
-  echo "  Ensuring directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE}..."
-  # Use double quotes around the command for ssh
-  ssh "${NODE}" "mkdir -p ${REMOTE_OUTPUT_DIR_REL_HOME}"
-  if [ $? -ne 0 ]; then
-      echo "  Error: Failed to ensure directory ${REMOTE_OUTPUT_DIR_REL_HOME} exists on ${NODE} via ssh."
-      COPY_FAILED=1
-      # Continue to check other nodes, but flag failure
-      continue # Skip scp for this node if mkdir failed
-  fi
-
-  echo "  Copying ${OUTPUT_EXECUTABLE_ABS} to ${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
-  # Use the absolute path for the source, relative path (from home) for destination
-  scp "${OUTPUT_EXECUTABLE_ABS}" "${NODE}:${REMOTE_OUTPUT_DIR_REL_HOME}/"
-  if [ $? -ne 0 ]; then
-    echo "  Error: Failed to copy executable to ${NODE}!"
-    COPY_FAILED=1
-  fi
-done
-
-if [ ${COPY_FAILED} -eq 1 ]; then
-    echo "Error: Distribution failed on one or more nodes. Aborting execution."
-    exit 1
-fi
-echo "Distribution successful."
-echo "--------------------"
-
 # --- Execution ---
 echo "--- Execution ---"
 echo "Executing ${OUTPUT_EXECUTABLE_REL_HOME} with ${NUM_OF_PROCESSES} processes..."
@@ -127,7 +87,7 @@ echo "MPI Program Arguments: ${MPI_PROGRAM_ARGS[*]}" # Show arguments being pass
 # Execute the mpi program using the path relative to the home directory.
 # Pass any additional arguments captured earlier using "${MPI_PROGRAM_ARGS[@]}"
 # The quotes around "${MPI_PROGRAM_ARGS[@]}" are important to handle arguments with spaces correctly.
-mpirun -np "${NUM_OF_PROCESSES}" --hostfile "${HOSTFILE_PATH_RESOLVED}" "${OUTPUT_EXECUTABLE_REL_HOME}" "${MPI_PROGRAM_ARGS[@]}"
+mpirun -np "${NUM_OF_PROCESSES}"  "${OUTPUT_EXECUTABLE_REL_HOME}" "${MPI_PROGRAM_ARGS[@]}"
 EXECUTION_STATUS=$? # Capture the exit status of mpirun
 
 if [ ${EXECUTION_STATUS} -ne 0 ]; then
@@ -139,3 +99,4 @@ fi
 echo "Execution finished successfully."
 echo "--------------------"
 exit 0
+
