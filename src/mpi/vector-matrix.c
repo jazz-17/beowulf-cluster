@@ -9,8 +9,7 @@ int main(int argc, char *argv[])
     int my_rank, comm_sz;
 
     // --- Hardcoded Dimensions (ensure divisible by comm_sz) ---
-    // Using the defaults you mentioned m=9, n=6 which works for comm_sz=3
-    const int m = 8;
+    const int m = 9;
     const int n = 6;
 
     int local_m;            // Number of rows per process
@@ -73,6 +72,20 @@ int main(int argc, char *argv[])
         printf("Rank 0: Setup complete. local_m=%d, local_n=%d\n", local_m, local_n);
         fflush(stdout);
     }
+
+    // ... before Allgather ...
+    printf("Rank %d: Reached MPI_Allgather.\n", my_rank);
+    fflush(stdout);
+    MPI_Barrier(MPI_COMM_WORLD); // Optional: Sync before collective
+
+    MPI_Allgather(local_x, local_n, MPI_DOUBLE,
+                  full_x, local_n, MPI_DOUBLE,
+                  MPI_COMM_WORLD);
+
+    MPI_Barrier(MPI_COMM_WORLD); // Optional: Sync after collective
+    printf("Rank %d: Finished MPI_Allgather.\n", my_rank);
+    fflush(stdout);
+    // ... rest of the
 
     // --- Gather the full x vector on all processes ---
     MPI_Allgather(local_x,         // Send buffer
