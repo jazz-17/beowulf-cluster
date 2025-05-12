@@ -1,144 +1,214 @@
+#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> // For memset
-#include <mpi.h>
-// #include <time.h> // No longer needed for srand
+#include <time.h> // For srand
+
+// Define matrix dimensions (make N divisible by number of processes for this simple example)
+// If N is not divisible, the root handles the remainder, making the logic slightly more complex.
+// Let's assume N is large enough and potentially divisible for simplicity.
+#define N 8 // Dimension of the square matrix and vector
+
+// Function to print a matrix (optional, for debugging)
+void print_matrix(double mat[N][N], int rows, int cols)
+{
+    printf("Matrix:\n");
+    for (int i = 0; i < rows; i++)
+    {
+        printf("  [");
+        for (int j = 0; j < cols; j++)
+        {
+            printf("%6.2f%s", mat[i][j], (j == cols - 1) ? "" : ", ");
+        }
+        printf("]\n");
+    }
+}
+
+// Function to print a vector (optional, for debugging)
+void print_vector(double vec[], int size)
+{
+    printf("Vector: [");
+    for (int i = 0; i < size; i++)
+    {
+        printf("%6.2f%s", vec[i], (i == size - 1) ? "" : ", ");
+    }
+    printf("]\n");
+}
 
 int main(int argc, char *argv[])
 {
-    int my_rank, comm_sz;
+    int rank, size;
+    double matrix_A[N][N];
+    double vector_x[N];
+    double result_b[N];          // Final result vector (only rank 0 needs the full one)
+    double local_rows[N / 2][N]; // Buffer for rows received by workers (adjust size if needed)
+    double local_result[N / 2];  // Buffer for partial results calculated by workers
 
-    // --- Hardcoded Dimensions (ensure divisible by comm_sz) ---
-    const int m = 9;
-    const int n = 6;
+    MPI_Status status;
 
-    int local_m;            // Number of rows per process
-    int local_n;            // Number of elements of x per process (initial distribution)
-    double *local_A = NULL; // Local part of matrix A (local_m x n)
-    double *local_x = NULL; // Local part of vector x (local_n elements)
-    double *full_x = NULL;  // Full vector x (n elements), received via Allgather
-    double *local_y = NULL; // Local part of result vector y (local_m elements)
+    MPI_Init(&argc, &argv);               // Initialize MPI environment
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank); // Get the rank (ID) of the current process
+    MPI_Comm_size(MPI_COMM_WORLD, &size); // Get the total number of processes
 
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
-
-    // --- Check for Divisibility (Still Important!) ---
-    if (m <= 0 || n <= 0 || m % comm_sz != 0 || n % comm_sz != 0)
+    // Basic check: Ensure N is somewhat reasonable compared to size
+    if (N < size)
     {
-        if (my_rank == 0)
+        if (rank == 0)
         {
-            // Use fprintf for error messages
-            fprintf(stderr, "Error: Hardcoded m (%d) or n (%d) is not divisible by comm_sz (%d)\n", m, n, comm_sz);
+            fprintf(stderr, "Error: Matrix dimension N (%d) should ideally be >= number of processes (%d) for good distribution.\n", N, size);
         }
         MPI_Finalize();
         return 1;
     }
 
-    local_m = m / comm_sz;
-    local_n = n / comm_sz;
-
-    // --- Memory Allocation ---
-    // Use calloc to initialize to zero, slightly simpler than malloc+memset for y
-    local_A = (double *)malloc(local_m * n * sizeof(double));
-    local_x = (double *)malloc(local_n * sizeof(double));
-    full_x = (double *)malloc(n * sizeof(double));
-    local_y = (double *)calloc(local_m, sizeof(double)); // Allocates and zeros
-
-    if (!local_A || !local_x || !full_x || !local_y)
+    // --- Root Process (Rank 0): Initialize data and distribute ---
+    if (rank == 0)
     {
-        fprintf(stderr, "Rank %d: Failed to allocate memory (m=%d, n=%d, local_m=%d, local_n=%d).\n", my_rank, m, n, local_m, local_n);
-        MPI_Abort(MPI_COMM_WORLD, 1); // Abort all processes
-    }
+        printf("MPI Matrix-Vector Multiplication (N=%d, Processes=%d)\n", N, size);
+        srand(time(NULL)); // Seed random number generator
 
-    // --- Simplified Data Initialization ---
-    // Initialize local_A (just use rank number for simplicity)
-    for (int i = 0; i < local_m; i++)
-    {
-        for (int j = 0; j < n; j++)
+        // Initialize matrix A and vector x with some values (e.g., random or sequential)
+        printf("Initializing matrix A and vector x...\n");
+        for (int i = 0; i < N; i++)
         {
-            local_A[i * n + j] = (double)(my_rank + 1.0); // Each rank gets rows with value 1.0, 2.0, 3.0 etc.
+            vector_x[i] = (double)(i + 1); // Example: 1, 2, 3, ...
+            for (int j = 0; j < N; j++)
+            {
+                // matrix_A[i][j] = (double)(rand() % 10); // Random 0-9
+                matrix_A[i][j] = (double)(i * N + j + 1); // Example: 1, 2, .. N*N
+            }
         }
-    }
 
-    // Initialize local_x (just use rank number differently)
-    for (int i = 0; i < local_n; i++)
-    {
-        local_x[i] = (double)(my_rank + 0.5); // Rank 0 gets 0.5, Rank 1 gets 1.5, etc.
-    }
+        // Optional: Print initial matrix and vector
+        // print_matrix(matrix_A, N, N);
+        // print_vector(vector_x, N);
+        printf("Initialization complete.\n");
 
-    if (my_rank == 0)
-    {
-        printf("Rank 0: Setup complete. local_m=%d, local_n=%d\n", local_m, local_n);
-        fflush(stdout);
-    }
+        // --- Distribute vector x to all processes ---
+        printf("Broadcasting vector x...\n");
+        MPI_Bcast(vector_x, N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-    // ... before Allgather ...
-    printf("Rank %d: Reached MPI_Allgather.\n", my_rank);
-    fflush(stdout);
+        // --- Distribute rows of matrix A to worker processes ---
+        printf("Distributing matrix A rows...\n");
+        int rows_per_proc = N / size;
+        int remainder = N % size; // Rows left over if not perfectly divisible
+        int rows_sent = 0;
+        int current_row_index = 0;
 
-    MPI_Allgather(local_x, local_n, MPI_DOUBLE,
-                  full_x, local_n, MPI_DOUBLE,
-                  MPI_COMM_WORLD);
+        // Calculate rows for the root process itself
+        int root_rows = rows_per_proc + remainder; // Root handles the remainder
+        rows_sent = root_rows;                     // Keep track of rows assigned
+        current_row_index += root_rows;
 
-    printf("Rank %d: Finished MPI_Allgather.\n", my_rank);
-    fflush(stdout);
-    // ... rest of the
-
-    // --- Gather the full x vector on all processes ---
-    MPI_Allgather(local_x,         // Send buffer
-                  local_n,         // Count of elements to send
-                  MPI_DOUBLE,      // Type of elements to send
-                  full_x,          // Receive buffer
-                  local_n,         // Count of elements received *per process*
-                  MPI_DOUBLE,      // Type of elements to receive
-                  MPI_COMM_WORLD); // Communicator
-
-    // --- Minimal check after Allgather ---
-    if (my_rank == 0)
-    {
-        printf("Rank 0: MPI_Allgather finished. First element of full_x = %.2f\n", full_x[0]);
-        fflush(stdout);
-    }
-    // Barrier to make sure rank 0 prints before others start heavy computation
-    // and potentially print their "done" message too early.
-    MPI_Barrier(MPI_COMM_WORLD);
-
-    // --- Perform Local Matrix-Vector Multiplication ---
-    // local_y was already initialized to zero by calloc
-
-    for (int i = 0; i < local_m; i++)
-    { // Loop through local rows
-        for (int j = 0; j < n; j++)
-        { // Loop through columns (full width of A/x)
-            local_y[i] += local_A[i * n + j] * full_x[j];
-        }
-    }
-
-    // --- Minimal Output - Show computation finished ---
-    // Stagger output slightly using a barrier and rank check
-    for (int r = 0; r < comm_sz; ++r)
-    {
-        if (my_rank == r)
+        // Send rows to each worker process
+        for (int dest_rank = 1; dest_rank < size; dest_rank++)
         {
-            printf("Rank %d: Computation finished. local_y[0] = %.2f\n", my_rank, local_y[0]);
-            fflush(stdout); // Make sure output is visible immediately
+            int rows_to_send = rows_per_proc;
+            if (rows_to_send > 0)
+            { // Only send if there are rows to send
+                MPI_Send(
+                    &matrix_A[current_row_index][0], // Pointer to the start of the rows
+                    rows_to_send * N,                // Number of elements to send (rows * columns)
+                    MPI_DOUBLE,                      // Data type
+                    dest_rank,                       // Destination rank
+                    0,                               // Message tag
+                    MPI_COMM_WORLD                   // Communicator
+                );
+                rows_sent += rows_to_send;
+                current_row_index += rows_to_send;
+            }
+            else
+            {
+                // Handle case where N < size, some processes might get 0 rows initially.
+                // We could send a dummy message or handle it in the receiving part.
+                // For simplicity here, we assume N >= size and rows_per_proc >= 1 usually.
+            }
         }
-        MPI_Barrier(MPI_COMM_WORLD); // Wait for current rank to print
+        printf("Distribution complete. Root keeps %d rows. Workers get %d rows each.\n", root_rows, rows_per_proc);
+
+        // --- Root Process: Calculate its portion of the result ---
+        printf("Root calculating its %d rows...\n", root_rows);
+        for (int i = 0; i < root_rows; i++)
+        {
+            result_b[i] = 0.0;
+            for (int j = 0; j < N; j++)
+            {
+                result_b[i] += matrix_A[i][j] * vector_x[j];
+            }
+        }
+
+        // --- Root Process: Gather results from worker processes ---
+        printf("Root gathering results from workers...\n");
+        int received_row_index = root_rows; // Start index for placing received results
+        for (int source_rank = 1; source_rank < size; source_rank++)
+        {
+            int rows_to_receive = rows_per_proc; // Match rows sent
+            if (rows_to_receive > 0)
+            {
+                MPI_Recv(
+                    &result_b[received_row_index], // Pointer to where to store received results
+                    rows_to_receive,               // Number of elements expected
+                    MPI_DOUBLE,                    // Data type
+                    source_rank,                   // Source rank
+                    1,                             // Message tag (use a different tag for results)
+                    MPI_COMM_WORLD,                // Communicator
+                    &status                        // MPI Status object
+                );
+                received_row_index += rows_to_receive;
+            }
+        }
+
+        // --- Root Process: Print the final result vector ---
+        printf("\n--- Final Result Vector b ---\n");
+        print_vector(result_b, N);
+        printf("-----------------------------\n");
     }
-
-    // --- Cleanup ---
-    free(local_A);
-    free(local_x);
-    free(full_x);
-    free(local_y);
-
-    if (my_rank == 0)
+    // --- Worker Processes (Rank > 0): Receive data, compute, send back ---
+    else
     {
-        printf("Rank 0: MPI_Finalize next.\n");
-        fflush(stdout);
+        // --- Receive broadcast vector x ---
+        MPI_Bcast(vector_x, N, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+        // --- Receive rows of matrix A from root ---
+        int rows_per_proc = N / size; // Worker calculates how many rows it expects
+        if (rows_per_proc > 0)
+        {
+            MPI_Recv(
+                local_rows,        // Buffer to store received rows
+                rows_per_proc * N, // Number of elements expected
+                MPI_DOUBLE,        // Data type
+                0,                 // Source rank (root)
+                0,                 // Message tag (matches send tag)
+                MPI_COMM_WORLD,    // Communicator
+                &status            // MPI Status object
+            );
+
+            // --- Worker Process: Calculate its portion of the result ---
+            for (int i = 0; i < rows_per_proc; i++)
+            {
+                local_result[i] = 0.0;
+                for (int j = 0; j < N; j++)
+                {
+                    local_result[i] += local_rows[i][j] * vector_x[j];
+                }
+            }
+
+            // --- Worker Process: Send results back to root ---
+            MPI_Send(
+                local_result,  // Pointer to the calculated partial result
+                rows_per_proc, // Number of elements to send
+                MPI_DOUBLE,    // Data type
+                0,             // Destination rank (root)
+                1,             // Message tag (use a different tag for results)
+                MPI_COMM_WORLD // Communicator
+            );
+        }
+        else
+        {
+            // If N < size or N not divisible, some processes might not receive/calculate/send.
+            // This simple version assumes N >= size and rows_per_proc >= 1.
+        }
     }
 
-    MPI_Finalize();
+    MPI_Finalize(); // Finalize MPI environment
     return 0;
 }
