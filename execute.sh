@@ -7,7 +7,7 @@
 # --- Configuration ---
 # Use $HOME for reliable home directory expansion
 HOSTFILE_PATH="$HOME/hostfile"                  # Path to the MPI hostfile
-BIN_DIR="$HOME/beowulf-cluster/build"           # Directory containing the MPI executables
+BIN_DIR="$HOME/SHARED"           # Directory containing the MPI executables
 DEFAULT_NUM_PROCESSES=3                         # Default number of processes if not specified
 
 # Silence PMIX warning if needed (keep this if it solves a problem for you)
