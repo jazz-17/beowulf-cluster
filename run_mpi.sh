@@ -8,7 +8,7 @@ SOURCE_SUBDIR="src/mpi"
 OUTPUT_SUBDIR="build"
 
 FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g for debugging)
-NODES=("node2" "node3")                  # List of worker nodes to copy the executable to (assumes node1 is local)
+NODES=("nodo1", "nodo2", "nodo3")                  # List of worker nodes to copy the executable to (assumes node1 is local)
 HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
 export PMIX_MCA_pcompress_base_silence_warning=1
 # --- Argument Handling ---

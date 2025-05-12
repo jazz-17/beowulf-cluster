@@ -11,30 +11,8 @@ FLAGS="-Wall -Wextra -g"                 # Compiler flags (e.g., -Wall, -O2, -g 
 HOSTFILE_PATH="~/hostfile"               # Path to the MPI hostfile (tilde expansion is handled)
 export PMIX_MCA_pcompress_base_silence_warning=1
 
-# --- Argument Handling ---
-if [ "$#" -lt 2 ]; then
-  echo "Usage: $0 <source_filename_no_extension> <num_processes> [args_for_mpi_program...]"
-  echo "  Example 1 (no args for program): $0 mpi_hello 4"
-  echo "  Example 2 (with args for program): $0 mpi_trapezoid 4 0.0 1.0 10000"
-  echo "  Assumes source file is located at: ./${SOURCE_SUBDIR}/<source_filename>.c"
-  echo "  Compiled executable will be placed at: ./${OUTPUT_SUBDIR}/<source_filename>"
-  echo "  Requires hostfile at: ${HOSTFILE_PATH}"
-  exit 1
-fi
-
 FILENAME_NO_EXT="$1"
 NUM_OF_PROCESSES="$2"
-
-# Basic check for positive integer for number of processes
-if ! [[ "$NUM_OF_PROCESSES" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Error: Number of processes must be a positive integer, got '${NUM_OF_PROCESSES}'."
-    exit 1
-fi
-
-# Remove the first two arguments (script name handled implicitly, filename, num_processes)
-# so that $@ contains only the arguments intended for the MPI program.
-shift 2
-MPI_PROGRAM_ARGS=("$@") # Store remaining arguments in an array for clarity/safety
 
 # --- Path Management ---
 # Get the directory where the script is located
@@ -54,8 +32,6 @@ if [ ! -f "${SOURCE_FILE}" ]; then
   exit 1
 fi
 echo "Source file found: ${SOURCE_FILE}"
-
-echo "--------------------"
 
 
 # --- Ensure output directory exists (locally) ---
@@ -78,25 +54,3 @@ if ! mpicc "${SOURCE_FILE}" -o "${OUTPUT_EXECUTABLE_ABS}" ${FLAGS}; then
 fi
 echo "Compilation successful."
 echo "--------------------"
-
-# --- Execution ---
-echo "--- Execution ---"
-echo "Executing ${OUTPUT_EXECUTABLE_REL_HOME} with ${NUM_OF_PROCESSES} processes..."
-echo "MPI Program Arguments: ${MPI_PROGRAM_ARGS[*]}" # Show arguments being passed
-
-# Execute the mpi program using the path relative to the home directory.
-# Pass any additional arguments captured earlier using "${MPI_PROGRAM_ARGS[@]}"
-# The quotes around "${MPI_PROGRAM_ARGS[@]}" are important to handle arguments with spaces correctly.
-mpirun -np "${NUM_OF_PROCESSES}"  "${OUTPUT_EXECUTABLE_REL_HOME}" "${MPI_PROGRAM_ARGS[@]}"
-EXECUTION_STATUS=$? # Capture the exit status of mpirun
-
-if [ ${EXECUTION_STATUS} -ne 0 ]; then
-  echo "Error: Execution failed with status: ${EXECUTION_STATUS}"
-  echo "--------------------"
-  exit ${EXECUTION_STATUS} # Exit with the same status as the failed command
-fi
-
-echo "Execution finished successfully."
-echo "--------------------"
-exit 0
-
